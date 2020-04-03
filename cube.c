@@ -327,6 +327,7 @@ struct demo {
     char *enabled_layers[64];
 
     int width, height;
+    VkExtent2D extent;
     VkFormat format;
     VkColorSpaceKHR color_space;
 
@@ -674,8 +675,8 @@ static void demo_draw_build_cmd(struct demo *demo, VkCommandBuffer cmd_buf) {
         .framebuffer = demo->swapchain_image_resources[demo->current_buffer].framebuffer,
         .renderArea.offset.x = 0,
         .renderArea.offset.y = 0,
-        .renderArea.extent.width = demo->width,
-        .renderArea.extent.height = demo->height,
+        .renderArea.extent.width = demo->extent.width,
+        .renderArea.extent.height = demo->extent.height,
         .clearValueCount = 2,
         .pClearValues = clear_values,
     };
@@ -724,12 +725,12 @@ static void demo_draw_build_cmd(struct demo *demo, VkCommandBuffer cmd_buf) {
     VkViewport viewport;
     memset(&viewport, 0, sizeof(viewport));
     float viewport_dimension;
-    if (demo->width < demo->height) {
-        viewport_dimension = (float)demo->width;
-        viewport.y = (demo->height - demo->width) / 2.0f;
+    if (demo->extent.width < demo->extent.height) {
+        viewport_dimension = (float)demo->extent.width;
+        viewport.y = (demo->extent.height - demo->extent.width) / 2.0f;
     } else {
-        viewport_dimension = (float)demo->height;
-        viewport.x = (demo->width - demo->height) / 2.0f;
+        viewport_dimension = (float)demo->extent.height;
+        viewport.x = (demo->extent.width - demo->extent.height) / 2.0f;
     }
     viewport.height = viewport_dimension;
     viewport.width = viewport_dimension;
@@ -739,8 +740,8 @@ static void demo_draw_build_cmd(struct demo *demo, VkCommandBuffer cmd_buf) {
 
     VkRect2D scissor;
     memset(&scissor, 0, sizeof(scissor));
-    scissor.extent.width = demo->width;
-    scissor.extent.height = demo->height;
+    scissor.extent.width = demo->extent.width;
+    scissor.extent.height = demo->extent.height;
     scissor.offset.x = 0;
     scissor.offset.y = 0;
     vkCmdSetScissor(cmd_buf, 0, 1, &scissor);
@@ -832,7 +833,8 @@ void demo_update_data_buffer(struct demo *demo) {
 
     // Rotate around the Y axis
     mat4x4_dup(Model, demo->model_matrix);
-    mat4x4_rotate(demo->model_matrix, Model, 0.0f, 1.0f, 0.0f, (float)degreesToRadians(demo->spin_angle));
+    if (!demo->pause)
+        mat4x4_rotate(demo->model_matrix, Model, 0.0f, 1.0f, 0.0f, (float)degreesToRadians(demo->spin_angle));
     mat4x4_mul(MVP, VP, demo->model_matrix);
 
     memcpy(demo->swapchain_image_resources[demo->current_buffer].uniform_memory_ptr, (const void *)&MVP[0][0], matrixSize);
@@ -1153,8 +1155,8 @@ static void demo_prepare_buffers(struct demo *demo) {
         // If the surface size is undefined, the size is set to the size
         // of the images requested, which must fit within the minimum and
         // maximum values.
-        swapchainExtent.width = demo->width;
-        swapchainExtent.height = demo->height;
+        swapchainExtent.width = demo->extent.width;
+        swapchainExtent.height = demo->extent.height;
 
         if (swapchainExtent.width < surfCapabilities.minImageExtent.width) {
             swapchainExtent.width = surfCapabilities.minImageExtent.width;
@@ -1170,11 +1172,11 @@ static void demo_prepare_buffers(struct demo *demo) {
     } else {
         // If the surface size is defined, the swap chain size must match
         swapchainExtent = surfCapabilities.currentExtent;
-        demo->width = surfCapabilities.currentExtent.width;
-        demo->height = surfCapabilities.currentExtent.height;
+        demo->extent.width = surfCapabilities.currentExtent.width;
+        demo->extent.height = surfCapabilities.currentExtent.height;
     }
 
-    if (demo->width == 0 || demo->height == 0) {
+    if (demo->extent.width == 0 || demo->extent.height == 0) {
         demo->is_minimized = true;
         return;
     } else {
@@ -1363,7 +1365,7 @@ static void demo_prepare_depth(struct demo *demo) {
         .pNext = NULL,
         .imageType = VK_IMAGE_TYPE_2D,
         .format = depth_format,
-        .extent = {demo->width, demo->height, 1},
+        .extent = {demo->extent.width, demo->extent.height, 1},
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -2128,8 +2130,8 @@ static void demo_prepare_framebuffers(struct demo *demo) {
         .renderPass = demo->render_pass,
         .attachmentCount = 2,
         .pAttachments = attachments,
-        .width = demo->width,
-        .height = demo->height,
+        .width = demo->extent.width,
+        .height = demo->extent.height,
         .layers = 1,
     };
     VkResult U_ASSERT_ONLY err;
@@ -2305,6 +2307,7 @@ static void demo_cleanup(struct demo *demo) {
     vkDestroySurfaceKHR(demo->inst, demo->surface, NULL);
     SDL_DestroyWindow(demo->window);
     vkDestroyInstance(demo->inst, NULL);
+    SDL_Quit();
 }
 
 static void demo_resize(struct demo *demo) {
@@ -2394,10 +2397,16 @@ static void demo_handle_event(struct demo *demo, const SDL_Event *event) {
         case SDL_WINDOWEVENT_RESIZED:
             {
                 int w, h;
-                SDL_Vulkan_GetDrawableSize(demo->window, &w, &h);
+
+                SDL_GetWindowSize(demo->window, &w, &h);
                 demo->width = w;
                 demo->height = h;
+
+                SDL_Vulkan_GetDrawableSize(demo->window, &w, &h);
+                demo->extent.width = w;
+                demo->extent.height = h;
             }
+            SDL_Log("Window resized: %d %d", demo->width, demo->height);
             demo_resize(demo);
             break;
         }
@@ -2420,7 +2429,7 @@ static void demo_run(struct demo *demo) {
             }
         }
 
-        if (demo->pause || demo->quit)
+        if (demo->quit)
             continue;
 
         demo_draw(demo);
@@ -2432,11 +2441,16 @@ static void demo_run(struct demo *demo) {
 }
 
 static void demo_create_window(struct demo *demo) {
-    demo->window = SDL_CreateWindow(APP_LONG_NAME, -1, -1, demo->width, demo->height, SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI);
+    demo->window = SDL_CreateWindow(APP_LONG_NAME, -1, -1, demo->width, demo->height, SDL_WINDOW_SHOWN | SDL_WINDOW_VULKAN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE);
     if (!demo->window) {
         SDL_Log("Failed to create SDL window: %s", SDL_GetError());
         exit(1);
     }
+
+    int w, h;
+    SDL_Vulkan_GetDrawableSize(demo->window, &w, &h);
+    demo->extent.width = w;
+    demo->extent.height = h;
 }
 
 /*

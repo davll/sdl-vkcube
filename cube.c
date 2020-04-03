@@ -2390,7 +2390,7 @@ static void demo_handle_event(struct demo *demo, const SDL_Event *event) {
         }
         break;
     case SDL_WINDOWEVENT:
-        switch (event->window.type) {
+        switch (event->window.event) {
         case SDL_WINDOWEVENT_CLOSE:
             demo->quit = true;
             break;
@@ -2406,7 +2406,7 @@ static void demo_handle_event(struct demo *demo, const SDL_Event *event) {
                 demo->extent.width = w;
                 demo->extent.height = h;
             }
-            SDL_Log("Window resized: %d %d", demo->width, demo->height);
+            //SDL_Log("Window resized: %d %d", demo->width, demo->height);
             demo_resize(demo);
             break;
         }
